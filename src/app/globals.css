@@ -31,3 +31,14 @@ body{margin:0; font-family: Inter, Montserrat, system-ui, -apple-system, Segoe U
 .link{color:var(--jab-blue); text-decoration:none}
 .link:hover{text-decoration:underline}
 .video{width:100%; max-height:520px; border-radius:16px; border:1px solid rgba(255,255,255,.1)}
+.prompt-block {
+  flex: 1 1 100%;
+}
+
+.prompt-textarea {
+  width: 100%;
+  min-width: 100%;
+  resize: vertical;
+  font-size: 15px;
+  line-height: 1.5;
+}
