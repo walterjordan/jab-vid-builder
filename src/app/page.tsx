@@ -43,13 +43,21 @@ export default function Page(){
   return (
     <div className="row">
       <section className="card">
-        <h1 className="h1">WOW • Fall Cabinet Ad (Veo 3.1)</h1>
-        <p className="lead">Generate a short, high‑energy kitchen transformation spot with synchronized audio. Edit the prompt below to test your own ad concept.</p>
+        <h1 className="h1">WOW • AI Ad Creator</h1>
+        <p className="lead">Generate a short, high‑energy kitchen transformation ad with synchronized audio. Edit the prompt below to test your own ad concept.</p>
         <form className="controls" onSubmit={handleGenerate}>
-          <div style={{width:"100%"}}>
-            <div className="label">Prompt</div>
-            <textarea className="input" name="prompt" rows={5} value={prompt} onChange={e=>setPrompt(e.target.value)} />
-          </div>
+          <div className="prompt-block" style={{flexBasis: "100%", width: "100%"}}>
+  <div className="label">Prompt</div>
+  <textarea
+    name="prompt"
+    rows={6}
+    value={prompt}
+    onChange={e => setPrompt(e.target.value)}
+    className="input prompt-textarea"
+    style={{width: "100%", minWidth: "100%", resize: "vertical"}}
+  />
+</div>
+
           <div>
             <div className="label">Aspect Ratio</div>
             <select className="select" name="aspectRatio" defaultValue="16:9">
