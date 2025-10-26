@@ -20,13 +20,14 @@ export async function generateVeoVideo(opts: VeoRequest): Promise<{ uri: string 
   const ai: any = getGenAI();
 
   // Start long‑running Veo 3 generation
-  let operation: any = await ai.models.generateVideos({
+let operation: any = await ai.models.generateVideos({
     model: "veo-3.0-generate-001",
     prompt: prompt ?? FALL_PROMPT,
     config: {
       aspectRatio,
       resolution,
       ...(typeof seed === "number" ? { seed } : {}),
+      durationSeconds: 30, // ✅ sets desired video length
       personGeneration: "allow_all",
       negativePrompt: "cartoon, drawing, low quality, watermark, text overlay"
     }
