@@ -1,45 +1,83 @@
+// src/lib/veo.ts
 import { GoogleGenAI } from "@google/genai";
 
-export const getGenAI = () => {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY is not set. Add it to .env.local");
-  return new GoogleGenAI({ apiKey: key });
-};
-
-export const FALL_PROMPT = `Watch a dull kitchen turn into a picture-perfect space in just one day with WOW 1 DAY PAINTING. This high-energy 45s before & after showcases expert cabinet painting, precision prep by our Emerald Shirt senior-pro team, and zero‑VOC finishes for healthier indoor air. Fast-motion transformation, clean lines, updated hardware and minimal disruption — no mess, no stress, just WOW.`;
+/** Current model hard limits for video duration (seconds). */
+export const MIN_DURATION = 4;
+export const MAX_DURATION = 8;
 
 export type VeoRequest = {
-  aspectRatio?: "16:9" | "9:16";
-  resolution?: "720p" | "1080p";
+  prompt: string;
+  /** "16:9" | "9:16" | "1:1" */
+  aspectRatio?: string;
+  /** "720p" | "1080p" | "4k" */
+  resolution?: string;
+  /** Desired seconds (will be clamped to 4–8 inclusive). */
+  durationSeconds?: number;
+  /** Optional seed for reproducibility. */
   seed?: number;
-  prompt?: string;
+  /** Model id, default "veo-3.0-generate-001" */
+  model?: string;
+  /** Optional explicit API key (otherwise resolved from env). */
+  apiKey?: string;
 };
 
-export async function generateVeoVideo(opts: VeoRequest): Promise<{ uri: string }>{
-  const { aspectRatio = "16:9", resolution = "720p", seed, prompt } = opts || {};
-  const ai: any = getGenAI();
+export type VeoResult = {
+  uri: string;
+  /** What caller asked for. */
+  requestedDurationSeconds: number;
+  /** What we actually sent to the provider (after clamping). */
+  durationSeconds: number;
+  /** Present if we had to clamp to the model's limits. */
+  note?: string;
+};
 
-  // Start long‑running Veo 3 generation
-let operation: any = await ai.models.generateVideos({
-    model: "veo-3.0-generate-001",
-    prompt: prompt ?? FALL_PROMPT,
-    config: {
-      aspectRatio,
-      resolution,
-      ...(typeof seed === "number" ? { seed } : {}),
-      durationSeconds: 30, // ✅ sets desired video length
-      personGeneration: "allow_all",
-      negativePrompt: "cartoon, drawing, low quality, watermark, text overlay"
-    }
-  });
+/** Resolve the API key from common env names. */
+function resolveApiKey(explicit?: string) {
+  return (
+    explicit ||
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env._GEMINI_API_KEY ||
+    ""
+  );
+}
 
-  // Poll until done
-  while (!operation.done) {
-    await new Promise((r) => setTimeout(r, 10_000));
-    operation = await ai.operations.getVideosOperation({ operation });
+/** Normalize + clamp a possibly-invalid duration to model limits. */
+function normalizeDuration(value: unknown, fallback = 8) {
+  const n = Number(value);
+  const requested = Number.isFinite(n) ? n : fallback;
+  const clamped = Math.max(MIN_DURATION, Math.min(MAX_DURATION, requested));
+  const didClamp = requested !== clamped;
+  return { requested, clamped, didClamp };
+}
+
+/**
+ * Generate a video via Gemini (Veo).
+ * Handles immediate-URI responses and long-running-operations (polling).
+ */
+export async function generateVeoVideo(req: VeoRequest): Promise<VeoResult> {
+  const {
+    prompt,
+    aspectRatio = "16:9",
+    resolution = "1080p",
+    durationSeconds,
+    seed,
+    model = "veo-3.0-generate-001",
+    apiKey: explicitKey,
+  } = req;
+
+  if (!prompt || typeof prompt !== "string" || prompt.trim().length < 5) {
+    throw new Error("Prompt is required (min 5 characters).");
   }
 
-  const uri: string | undefined = operation?.response?.generatedVideos?.[0]?.video?.uri;
-  if (!uri) throw new Error("No video URI returned from Veo operation.");
-  return { uri };
-}
+  const apiKey = resolveApiKey(explicitKey);
+  if (!apiKey) {
+    throw new Error(
+      "Missing API key (set GEMINI_API_KEY / GOOGLE_GENAI_API_KEY / _GEMINI_API_KEY)."
+    );
+  }
+
+  const { requested, clamped, didClamp } = normalizeDuration(durationSeconds, 8);
+
+  const ai = new GoogleGenAI({ apiKey
+
