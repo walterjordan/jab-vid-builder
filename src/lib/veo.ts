@@ -32,12 +32,12 @@ export type VeoResult = {
 };
 
 /** Resolve the API key from common env names. */
-function resolveApiKey(explicit?: string) {
+function resolveApiKey(explicit?: string): string {
   return (
     explicit ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GENAI_API_KEY ||
-    process.env._GEMINI_API_KEY ||
+    (process.env as any)._GEMINI_API_KEY ||
     ""
   );
 }
@@ -79,5 +79,69 @@ export async function generateVeoVideo(req: VeoRequest): Promise<VeoResult> {
 
   const { requested, clamped, didClamp } = normalizeDuration(durationSeconds, 8);
 
-  const ai = new GoogleGenAI({ apiKey
+  const ai = new GoogleGenAI({ apiKey });
+
+  // --- Call the video generation API
+  const op: any = await ai.models.generateVideos({
+    model,
+    prompt,
+    config: {
+      aspectRatio,
+      resolution,
+      ...(typeof seed === "number" ? { seed } : {}),
+      durationSeconds: clamped, // <= enforce model limit
+      personGeneration: "allow_all",
+      negativePrompt:
+        "cartoon, drawing, low quality, watermark, text overlay",
+    },
+  });
+
+  // --- Case 1: provider already returned a playable URI
+  if (op?.uri && typeof op.uri === "string") {
+    return {
+      uri: op.uri,
+      requestedDurationSeconds: requested,
+      durationSeconds: clamped,
+      ...(didClamp
+        ? { note: "Duration limited to 4–8s by the model. Value was clamped." }
+        : {}),
+    };
+  }
+
+  // --- Case 2: long-running operation (poll until done)
+  // Some SDK versions expose ai.operations.get; otherwise op.get() may exist.
+  const operations = (ai as any).operations;
+  const getOp =
+    (operations && typeof operations.get === "function" && operations.get.bind(operations)) ||
+    (op && typeof op.get === "function" && op.get.bind(op));
+
+  if (op?.name && getOp) {
+    // Poll every 2s up to ~4 minutes
+    const maxTries = 120;
+    for (let i = 0; i < maxTries; i++) {
+      const cur: any = await getOp({ name: op.name });
+      const uri =
+        cur?.response?.video?.uri ||
+        cur?.response?.uri ||
+        cur?.uri;
+
+      if (cur?.done && uri) {
+        return {
+          uri,
+          requestedDurationSeconds: requested,
+          durationSeconds: clamped,
+          ...(didClamp
+            ? { note: "Duration limited to 4–8s by the model. Value was clamped." }
+            : {}),
+        };
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    throw new Error("Video generation timed out while polling the operation.");
+  }
+
+  // --- Unexpected response shape
+  throw new Error("Unexpected response from generateVideos (no uri/operation).");
+}
+
 
