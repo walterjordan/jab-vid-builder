@@ -1,4 +1,3 @@
-// src/app/api/generate/route.ts
 import { NextResponse } from "next/server";
 import { generateVeoVideo, MIN_DURATION, MAX_DURATION } from "@/lib/veo";
 
@@ -12,14 +11,19 @@ type BodyShape = {
   resolution?: unknown;
   durationSeconds?: unknown;
   seed?: unknown;
-  model?: unknown;
+  model?: unknown; // may be string or object; we coerce to string below
 };
 
 function coerceString(v: unknown, fallback = ""): string {
   if (typeof v === "string") return v;
-  if (v && typeof v === "object" && "toString" in (v as any)) {
-    const s = String(v);
-    if (s && s !== "[object Object]") return s;
+  if (v && typeof v === "object") {
+    // If someone passes { name: "veo-..." } or something odd, try common props:
+    const maybeName = (v as any)?.name;
+    if (typeof maybeName === "string" && maybeName.trim()) return maybeName;
+    try {
+      const s = String(v);
+      if (s && s !== "[object Object]") return s;
+    } catch {}
   }
   return fallback;
 }
@@ -29,14 +33,12 @@ function coerceNumber(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-// Enforce provider combo rules.
-// For now: 1080p requires exactly 8s (per error from provider).
+// Provider-specific compatibility: 1080p must be exactly 8s.
 function resolveCompatibleDuration(resolution: string, requested?: number) {
   const req = Number.isFinite(requested as number) ? (requested as number) : 8;
   if (resolution.toLowerCase() === "1080p") {
     return { used: 8, note: "1080p requires exactly 8s; duration adjusted." };
   }
-  // Otherwise clamp to model range 4–8
   const used = Math.max(MIN_DURATION, Math.min(MAX_DURATION, req));
   const note = used !== req ? "Duration limited to 4–8s; value was clamped." : undefined;
   return { used, note };
@@ -53,7 +55,7 @@ export async function POST(req: Request) {
   const prompt = coerceString(body.prompt).trim();
   const aspectRatio = coerceString(body.aspectRatio, "16:9");
   const resolution = coerceString(body.resolution, "1080p");
-  const model = coerceString(body.model, "veo-3.0-generate-001");
+  const model = coerceString(body.model, "veo-3.0-generate-001"); // ✅ always a string id
   const seed = coerceNumber(body.seed);
   const requestedDuration = coerceNumber(body.durationSeconds);
 
@@ -64,22 +66,24 @@ export async function POST(req: Request) {
     );
   }
 
-  // 🔒 Enforce a compatible duration for the chosen resolution
+  // Enforce compatible duration for the selected resolution
   const { used: compatibleDuration, note: compatNote } = resolveCompatibleDuration(
     resolution,
     requestedDuration
   );
 
   try {
+    // Call Veo with safe, coerced values
     const res = await generateVeoVideo({
       prompt,
       aspectRatio,
       resolution,
       durationSeconds: compatibleDuration,
       seed,
-      model,
+      model, // ✅ string, never an object -> no .name anywhere
     });
 
+    // Compact success log for Cloud Run
     console.log(
       JSON.stringify({
         at: "generate",
@@ -116,7 +120,14 @@ export async function POST(req: Request) {
         ? ` Allowed range: ${MIN_DURATION}-${MAX_DURATION}s.`
         : "";
 
-    console.error(JSON.stringify({ at: "generate", ok: false, error: message }));
+    console.error(
+      JSON.stringify({
+        at: "generate",
+        ok: false,
+        error: message,
+        modelType: typeof body?.model, // helpful to catch future model objects
+      })
+    );
 
     return NextResponse.json({ error: `${message}${bounds}`.trim() }, { status: 400 });
   }
