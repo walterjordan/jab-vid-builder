@@ -1,4 +1,3 @@
-// src/lib/veo.ts
 import { GoogleGenAI } from "@google/genai";
 
 /** Current model hard limits for video duration (seconds). */
@@ -15,23 +14,19 @@ export type VeoRequest = {
   durationSeconds?: number;
   /** Optional seed for reproducibility. */
   seed?: number;
-  /** Model id, default "veo-3.0-generate-001" */
-  model?: string;
+  /** Model id */
+  model?: string; // defaulted below
   /** Optional explicit API key (otherwise resolved from env). */
   apiKey?: string;
 };
 
 export type VeoResult = {
   uri: string;
-  /** What caller asked for. */
   requestedDurationSeconds: number;
-  /** What we actually sent to the provider (after clamping). */
   durationSeconds: number;
-  /** Present if we had to clamp to the model's limits. */
   note?: string;
 };
 
-/** Resolve the API key from common env names. */
 function resolveApiKey(explicit?: string): string {
   return (
     explicit ||
@@ -42,13 +37,25 @@ function resolveApiKey(explicit?: string): string {
   );
 }
 
-/** Normalize + clamp a possibly-invalid duration to model limits. */
 function normalizeDuration(value: unknown, fallback = 8) {
   const n = Number(value);
   const requested = Number.isFinite(n) ? n : fallback;
   const clamped = Math.max(MIN_DURATION, Math.min(MAX_DURATION, requested));
   const didClamp = requested !== clamped;
   return { requested, clamped, didClamp };
+}
+
+function extractUriFromAny(obj: any): string | undefined {
+  if (!obj || typeof obj !== "object") return undefined;
+  // common shapes we’ve seen
+  return (
+    obj.uri ||
+    obj?.video?.uri ||
+    obj?.response?.video?.uri ||
+    obj?.response?.uri ||
+    (Array.isArray(obj?.videos) ? obj.videos[0]?.uri : undefined) ||
+    (Array.isArray(obj?.output) ? obj.output[0]?.uri : undefined)
+  );
 }
 
 /**
@@ -62,6 +69,7 @@ export async function generateVeoVideo(req: VeoRequest): Promise<VeoResult> {
     resolution = "1080p",
     durationSeconds,
     seed,
+    // ✅ Safe default so we never read model.name anywhere
     model = "veo-3.0-generate-001",
     apiKey: explicitKey,
   } = req;
@@ -81,25 +89,25 @@ export async function generateVeoVideo(req: VeoRequest): Promise<VeoResult> {
 
   const ai = new GoogleGenAI({ apiKey });
 
-  // --- Call the video generation API
+  // ---- Call the video generation API
   const op: any = await ai.models.generateVideos({
-    model,
+    model,      // string id, not an object
     prompt,
     config: {
       aspectRatio,
       resolution,
       ...(typeof seed === "number" ? { seed } : {}),
-      durationSeconds: clamped, // <= enforce model limit
+      durationSeconds: clamped, // enforce model limit
       personGeneration: "allow_all",
-      negativePrompt:
-        "cartoon, drawing, low quality, watermark, text overlay",
+      negativePrompt: "cartoon, drawing, low quality, watermark, text overlay",
     },
   });
 
-  // --- Case 1: provider already returned a playable URI
-  if (op?.uri && typeof op.uri === "string") {
+  // ---- Case 1: provider returned a URI right away
+  const directUri = extractUriFromAny(op);
+  if (typeof directUri === "string") {
     return {
-      uri: op.uri,
+      uri: directUri,
       requestedDurationSeconds: requested,
       durationSeconds: clamped,
       ...(didClamp
@@ -108,24 +116,22 @@ export async function generateVeoVideo(req: VeoRequest): Promise<VeoResult> {
     };
   }
 
-  // --- Case 2: long-running operation (poll until done)
-  // Some SDK versions expose ai.operations.get; otherwise op.get() may exist.
-  const operations = (ai as any).operations;
+  // ---- Case 2: long-running operation (poll only if we actually have a name)
+  const opName: string | undefined = typeof op?.name === "string" ? op.name : undefined;
+
+  // Prefer sdk operations client if present; otherwise some SDKs expose op.get()
+  const operations = (ai as any)?.operations;
   const getOp =
     (operations && typeof operations.get === "function" && operations.get.bind(operations)) ||
-    (op && typeof op.get === "function" && op.get.bind(op));
+    (op && typeof op.get === "function" && op.get.bind(op)) ||
+    null;
 
-  if (op?.name && getOp) {
-    // Poll every 2s up to ~4 minutes
-    const maxTries = 120;
+  if (opName && getOp) {
+    const maxTries = 120; // ~4 minutes @ 2s
     for (let i = 0; i < maxTries; i++) {
-      const cur: any = await getOp({ name: op.name });
-      const uri =
-        cur?.response?.video?.uri ||
-        cur?.response?.uri ||
-        cur?.uri;
-
-      if (cur?.done && uri) {
+      const cur: any = await getOp({ name: opName });
+      const uri = extractUriFromAny(cur);
+      if (cur?.done && typeof uri === "string") {
         return {
           uri,
           requestedDurationSeconds: requested,
@@ -140,8 +146,14 @@ export async function generateVeoVideo(req: VeoRequest): Promise<VeoResult> {
     throw new Error("Video generation timed out while polling the operation.");
   }
 
-  // --- Unexpected response shape
-  throw new Error("Unexpected response from generateVideos (no uri/operation).");
+  // ---- Unexpected response shape
+  // Include keys to help debug without crashing on undefined.name
+  const keys = op && typeof op === "object" ? Object.keys(op) : [];
+  throw new Error(
+    `Unexpected response from generateVideos (no uri/operation). Keys: ${JSON.stringify(
+      keys
+    )}`
+  );
 }
 
 
