@@ -1,31 +1,19 @@
-import { NextResponse } from "next/server";
-import { generateVeoVideo, MIN_DURATION, MAX_DURATION } from "@/lib/veo";
+// src/app/api/generate/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { generateVeoVideo } from "@/lib/veo";
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-type BodyShape = {
-  prompt?: unknown;
-  aspectRatio?: unknown;
-  resolution?: unknown;
-  durationSeconds?: unknown;
-  seed?: unknown;
-  model?: unknown; // may be string or object; we coerce to string below
-};
-
-function coerceString(v: unknown, fallback = ""): string {
-  if (typeof v === "string") return v;
-  if (v && typeof v === "object") {
-    // If someone passes { name: "veo-..." } or something odd, try common props:
-    const maybeName = (v as any)?.name;
-    if (typeof maybeName === "string" && maybeName.trim()) return maybeName;
-    try {
-      const s = String(v);
-      if (s && s !== "[object Object]") return s;
-    } catch {}
+/** Accept either a plain string id or an object with { name } and return a model id. */
+function coerceModel(v: unknown, fallback = "veo-3.0-fast-generate-001"): string {
+  if (typeof v === "string" && v.trim()) return v.trim();
+  if (v && typeof v === "object" && "name" in (v as any)) {
+    const n = (v as any).name;
+    if (typeof n === "string" && n.trim()) return n.trim();
   }
   return fallback;
+}
+
+function coerceString(v: unknown, fallback = ""): string {
+  return typeof v === "string" && v.trim() ? v.trim() : fallback;
 }
 
 function coerceNumber(v: unknown): number | undefined {
@@ -33,103 +21,76 @@ function coerceNumber(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-// Provider-specific compatibility: 1080p must be exactly 8s.
-function resolveCompatibleDuration(resolution: string, requested?: number) {
-  const req = Number.isFinite(requested as number) ? (requested as number) : 8;
-  if (resolution.toLowerCase() === "1080p") {
-    return { used: 8, note: "1080p requires exactly 8s; duration adjusted." };
-  }
-  const used = Math.max(MIN_DURATION, Math.min(MAX_DURATION, req));
-  const note = used !== req ? "Duration limited to 4–8s; value was clamped." : undefined;
-  return { used, note };
+/** Simple health check: confirms the route is reachable. */
+export async function GET() {
+  return NextResponse.json({ ok: true });
 }
 
-export async function POST(req: Request) {
-  let body: BodyShape;
+export async function POST(req: NextRequest) {
   try {
-    body = (await req.json()) as BodyShape;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+    const body = await req.json().catch(() => ({} as any));
 
-  const prompt = coerceString(body.prompt).trim();
-  const aspectRatio = coerceString(body.aspectRatio, "16:9");
-  const resolution = coerceString(body.resolution, "1080p");
-  const model = coerceString(body.model, "veo-3.0-generate-001"); // ✅ always a string id
-  const seed = coerceNumber(body.seed);
-  const requestedDuration = coerceNumber(body.durationSeconds);
+    // Required
+    const prompt = coerceString(body?.prompt);
+    if (!prompt || prompt.length < 5) {
+      return NextResponse.json(
+        { error: "Prompt is required (min 5 characters)." },
+        { status: 400 }
+      );
+    }
 
-  if (!prompt || prompt.length < 5) {
-    return NextResponse.json(
-      { error: "Prompt is required (min 5 characters)." },
-      { status: 400 }
-    );
-  }
+    // Optional / defaults
+    const aspectRatio = coerceString(body?.aspectRatio, "16:9") || "16:9";
+    const resolution = coerceString(body?.resolution, "720p") || "720p";
 
-  // Enforce compatible duration for the selected resolution
-  const { used: compatibleDuration, note: compatNote } = resolveCompatibleDuration(
-    resolution,
-    requestedDuration
-  );
+    // Duration: clamp 4–8s
+    const requestedDuration = coerceNumber(body?.durationSeconds) ?? 6;
+    const durationSeconds = Math.max(4, Math.min(8, requestedDuration));
 
-  try {
-    // Call Veo with safe, coerced values
-    const res = await generateVeoVideo({
+    // Model: accept string or { name }, default to fast 3.0
+    const modelId = coerceModel(body?.model, "veo-3.0-fast-generate-001");
+
+    // Seed: Veo currently ignores seed; do NOT send it (prevents API errors).
+    // const seed = coerceNumber(body?.seed); // intentionally unused
+
+    // Call generator (no seed passed)
+    const result: any = await generateVeoVideo({
       prompt,
       aspectRatio,
       resolution,
-      durationSeconds: compatibleDuration,
-      seed,
-      model, // ✅ string, never an object -> no .name anywhere
+      durationSeconds,
+      model: modelId,
     });
 
-    // Compact success log for Cloud Run
-    console.log(
-      JSON.stringify({
-        at: "generate",
-        ok: true,
-        model,
-        aspectRatio,
-        resolution,
-        requestedDurationSeconds: requestedDuration,
-        usedDurationSeconds: res.durationSeconds,
-      })
-    );
+    // Build response payload safely without relying on a typed `note` field
+    const payload: any = {
+      uri: result?.uri,
+      requestedDurationSeconds: requestedDuration,
+      durationSeconds: durationSeconds,
+      model: modelId,
+      aspectRatio,
+      resolution,
+    };
+    if (result && typeof result === "object" && "note" in result) {
+      payload.note = (result as any).note;
+    }
 
-    return NextResponse.json({
-      uri: res.uri,
-      meta: {
-        model,
-        aspectRatio,
-        resolution,
-        requestedDurationSeconds: res.requestedDurationSeconds,
-        usedDurationSeconds: res.durationSeconds,
-        note: compatNote ?? res.note ?? null,
-        service: process.env.K_SERVICE ?? null,
-        revision: process.env.K_REVISION ?? null,
-      },
-    });
+    if (!payload.uri) {
+      // Defensive: if provider returned no URI
+      return NextResponse.json(
+        { error: "Generation finished without a playable URI." },
+        { status: 502 }
+      );
+    }
+
+    return NextResponse.json(payload);
   } catch (err: any) {
-    const message =
-      (err?.response?.data && JSON.stringify(err.response.data)) ||
-      err?.message ||
-      "Video generation failed.";
+    // Normalize common GoogleGenAI errors where message may contain a wrapped JSON
+    const msg = typeof err?.message === "string" ? err.message : "Unknown error";
+    const isInvalidArg = /INVALID_ARGUMENT|400/.test(msg);
+    const status = isInvalidArg ? 400 : 500;
 
-    const bounds =
-      /out of bound|duration/i.test(message)
-        ? ` Allowed range: ${MIN_DURATION}-${MAX_DURATION}s.`
-        : "";
-
-    console.error(
-      JSON.stringify({
-        at: "generate",
-        ok: false,
-        error: message,
-        modelType: typeof body?.model, // helpful to catch future model objects
-      })
-    );
-
-    return NextResponse.json({ error: `${message}${bounds}`.trim() }, { status: 400 });
+    return NextResponse.json({ error: msg }, { status });
   }
 }
 
