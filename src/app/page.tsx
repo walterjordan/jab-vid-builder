@@ -1,7 +1,8 @@
 // src/app/page.tsx
 "use client";
-import type { CSSProperties } from "react";
+
 import { useState, useMemo } from "react";
+import type { CSSProperties } from "react";
 
 /* --- helper: poll operation until done or timeout --- */
 async function pollOperation(
@@ -65,7 +66,7 @@ export default function Home() {
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("720p");
   const [duration, setDuration] = useState(6);
-  // ✅ Default model -> Veo 3.0 Fast
+  // Default model -> Veo 3.0 Fast (cheap/permissive)
   const [model, setModel] = useState("veo-3.0-fast-generate-001");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -76,7 +77,6 @@ export default function Home() {
     [model]
   );
 
-  // ✅ Generate + poll; set a friendly download filename
   async function handleGenerate() {
     setBusy(true);
     setError("");
@@ -260,7 +260,7 @@ export default function Home() {
                   href={result.uri}
                   target="_blank"
                   rel="noreferrer"
-                  download={result.name} // ✅ friendlier filename
+                  download={result.name}
                   style={{ color: TEXT_MAIN, textDecoration: "underline", opacity: 0.9 }}
                 >
                   Open / Download result
@@ -290,30 +290,6 @@ export default function Home() {
   );
 }
 
-function inputStyle(): React.CSSProperties {
-  return {
-    width: "100%",
-    background: INPUT_BG,
-    color: TEXT_MAIN,
-    border: `1px solid ${INPUT_BORDER}`,
-    borderRadius: 10,
-    padding: "10px 12px",
-    outline: "none",
-  };
-}
-
-function selectStyle(): React.CSSProperties {
-  return {
-    width: "100%",
-    background: INPUT_BG,
-    color: TEXT_MAIN,
-    border: `1px solid ${INPUT_BORDER}`,
-    borderRadius: 10,
-    padding: "10px 12px",
-    outline: "none",
-    appearance: "none",
-  };
-}
 function inputStyle(): CSSProperties {
   return {
     width: "100%",
