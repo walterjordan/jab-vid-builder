@@ -118,7 +118,7 @@ export default function Home() {
       if (!polled.done) throw new Error("Generation timed out. Try again or lower resolution/duration.");
       if (!polled.uri) throw new Error("Operation finished but no video URI was returned.");
 
-      // Friendly filename like: veo_20251028_193012.mp4
+      // Friendly filename like: veo_YYYYMMDD_HHMMSS.mp4
       const ts = new Date();
       const stamp =
         ts.getFullYear().toString() +
@@ -257,10 +257,9 @@ export default function Home() {
 
               {result?.uri && (
                 <a
-                  href={result.uri}
+                  href={`/api/download?uri=${encodeURIComponent(result.uri)}&name=${encodeURIComponent(result.name)}`}
                   target="_blank"
                   rel="noreferrer"
-                  download={result.name}
                   style={{ color: TEXT_MAIN, textDecoration: "underline", opacity: 0.9 }}
                 >
                   Open / Download result
