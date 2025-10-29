@@ -143,12 +143,6 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: "100vh", background: BG, color: TEXT_MAIN }}>
-      {/* Header */}
-      <div style={{ maxWidth: 1120, margin: "0 auto", padding: "18px 20px", display: "flex", alignItems: "center", gap: 10, color: TEXT_DIM }}>
-        <div style={{ width: 28, height: 28, borderRadius: 8, background: "linear-gradient(135deg, #7FFF41 0%, #630183 50%, #FF00FF 100%)" }} />
-        <div style={{ fontWeight: 700, letterSpacing: 0.2 }}>JAB • Video Builder</div>
-        <div style={{ marginLeft: "auto", opacity: 0.8 }}>Jordan & Borden</div>
-      </div>
 
       {/* Card */}
       <div style={{ maxWidth: 1120, margin: "22px auto", padding: "0 20px" }}>
