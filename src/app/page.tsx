@@ -1,7 +1,36 @@
 // src/app/page.tsx
 "use client";
-
+import type { CSSProperties } from "react";
 import { useState, useMemo } from "react";
+
+/* --- helper: poll operation until done or timeout --- */
+async function pollOperation(
+  opName: string,
+  opts?: { intervalMs?: number; timeoutMs?: number }
+) {
+  const intervalMs = opts?.intervalMs ?? 4000;
+  const timeoutMs = opts?.timeoutMs ?? 240000; // 4 min cap
+  const start = Date.now();
+
+  while (true) {
+    const r = await fetch(`/api/generate?name=${encodeURIComponent(opName)}`);
+    const j = await r.json();
+
+    // expected shape:
+    // { name, done: boolean, response: { generateVideoResponse: { generatedSamples: [ { video: { uri } } ] } } }
+    if (j?.done) {
+      const uri =
+        j?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+      return { done: true, uri, raw: j };
+    }
+
+    if (Date.now() - start > timeoutMs) {
+      return { done: false, uri: undefined, raw: j, timeout: true };
+    }
+
+    await new Promise((res) => setTimeout(res, intervalMs));
+  }
+}
 
 type ModelOption = {
   value: string;
@@ -27,6 +56,8 @@ const INPUT_BG = "#0c0c12";
 const INPUT_BORDER = "rgba(255,255,255,0.12)";
 const ACCENT = "#630183";
 
+type Result = { uri: string; name: string };
+
 export default function Home() {
   const [prompt, setPrompt] = useState(
     "A cozy living room with soft fall sunlight. Two WOW 1 DAY PAINTING crew members in emerald-green shirts prep the wall with quick, confident motions. Overlay text: “Fall means family — make home holiday-ready in 1 day.” CTA overlay: “Book Now → wow1day.com.” Background: warm, light acoustic beat."
@@ -34,22 +65,30 @@ export default function Home() {
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("720p");
   const [duration, setDuration] = useState(6);
-  const [model, setModel] = useState(MODELS[0].value);
+  // ✅ Default model -> Veo 3.0 Fast
+  const [model, setModel] = useState("veo-3.0-fast-generate-001");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState<{ uri: string } | null>(null);
+  const [result, setResult] = useState<Result | null>(null);
 
   const modelNote = useMemo(
     () => MODELS.find((m) => m.value === model)?.note ?? "",
     [model]
   );
 
+  // ✅ Generate + poll; set a friendly download filename
   async function handleGenerate() {
     setBusy(true);
     setError("");
     setResult(null);
 
     try {
+      // Rule: 1080p typically requires 8s
+      if (resolution === "1080p" && duration < 8) {
+        setError("1080p requires 8s. Increase duration to 8s or switch to 720p.");
+        return;
+      }
+
       const body: Record<string, any> = {
         prompt,
         aspectRatio,
@@ -65,14 +104,36 @@ export default function Home() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || "Server error while generating video.");
+      if (!res.ok) {
+        throw new Error(data?.error || "Server error while starting generation.");
+      }
 
-      if (data.uri) setResult({ uri: data.uri });
-      else throw new Error("No video URI returned by API.");
+      const opName: string | undefined =
+        data?.operationName || data?.name || data?.operation?.name;
+      if (!opName) {
+        throw new Error("No operation name returned by API.");
+      }
+
+      const polled = await pollOperation(opName, { intervalMs: 3000, timeoutMs: 240000 });
+      if (!polled.done) throw new Error("Generation timed out. Try again or lower resolution/duration.");
+      if (!polled.uri) throw new Error("Operation finished but no video URI was returned.");
+
+      // Friendly filename like: veo_20251028_193012.mp4
+      const ts = new Date();
+      const stamp =
+        ts.getFullYear().toString() +
+        String(ts.getMonth() + 1).padStart(2, "0") +
+        String(ts.getDate()).padStart(2, "0") +
+        "_" +
+        String(ts.getHours()).padStart(2, "0") +
+        String(ts.getMinutes()).padStart(2, "0") +
+        String(ts.getSeconds()).padStart(2, "0");
+
+      setResult({ uri: polled.uri, name: `veo_${stamp}.mp4` });
     } catch (e: any) {
       setError(
         e?.message?.includes("429")
-          ? "Rate limit / quota hit for this model. Try switching to a different Veo model or wait before retrying."
+          ? "Rate limit / quota hit for this model. Try a different Veo model or wait."
           : e?.message || "Failed to generate video."
       );
     } finally {
@@ -164,7 +225,15 @@ export default function Home() {
 
               <div>
                 <label style={{ display: "block", marginBottom: 8, opacity: 0.9 }}>Duration: {duration}s (drag 4–8s)</label>
-                <input type="range" min={4} max={8} step={1} value={duration} onChange={(e) => setDuration(Number(e.target.value))} style={{ width: "100%" }} />
+                <input
+                  type="range"
+                  min={4}
+                  max={8}
+                  step={1}
+                  value={duration}
+                  onChange={(e) => setDuration(Number(e.target.value))}
+                  style={{ width: "100%" }}
+                />
               </div>
             </div>
 
@@ -187,15 +256,30 @@ export default function Home() {
               </button>
 
               {result?.uri && (
-                <a href={result.uri} target="_blank" rel="noreferrer" style={{ color: TEXT_MAIN, textDecoration: "underline", opacity: 0.9 }}>
-                  Open result
+                <a
+                  href={result.uri}
+                  target="_blank"
+                  rel="noreferrer"
+                  download={result.name} // ✅ friendlier filename
+                  style={{ color: TEXT_MAIN, textDecoration: "underline", opacity: 0.9 }}
+                >
+                  Open / Download result
                 </a>
               )}
             </div>
 
             {/* Error */}
             {error && (
-              <div style={{ marginTop: 16, padding: 12, background: "rgba(255,0,0,0.08)", border: "1px solid rgba(255,0,0,0.25)", borderRadius: 8, color: TEXT_MAIN }}>
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 12,
+                  background: "rgba(255,0,0,0.08)",
+                  border: "1px solid rgba(255,0,0,0.25)",
+                  borderRadius: 8,
+                  color: TEXT_MAIN,
+                }}
+              >
                 {error}
               </div>
             )}
@@ -230,5 +314,27 @@ function selectStyle(): React.CSSProperties {
     appearance: "none",
   };
 }
+function inputStyle(): CSSProperties {
+  return {
+    width: "100%",
+    background: INPUT_BG,
+    color: TEXT_MAIN,
+    border: `1px solid ${INPUT_BORDER}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    outline: "none",
+  };
+}
 
-
+function selectStyle(): CSSProperties {
+  return {
+    width: "100%",
+    background: INPUT_BG,
+    color: TEXT_MAIN,
+    border: `1px solid ${INPUT_BORDER}`,
+    borderRadius: 10,
+    padding: "10px 12px",
+    outline: "none",
+    appearance: "none",
+  };
+}
