@@ -4,6 +4,7 @@
   --jab-green:#00D084;    /* Signal Green */
   --jab-char:#1E1E1E;     /* Deep Charcoal */
   --jab-paper:#F7F7F7;    /* Paper White */
+  --jb-favicon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%237FFF41'/><text x='50' y='64' text-anchor='middle' font-size='44' font-family='Arial Black, sans-serif' font-weight='bold' fill='%23000'>JB</text></svg>");
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -12,7 +13,19 @@ body{margin:0; font-family: Inter, Montserrat, system-ui, -apple-system, Segoe U
 .header{position:sticky; top:0; backdrop-filter:saturate(180%) blur(6px); background:rgba(10,10,10,.6); border-bottom:1px solid rgba(255,255,255,.08);}
 .nav{display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 24px}
 .brand{display:flex; align-items:center; gap:12px}
-.brand-badge{width:36px; height:36px; border-radius:10px; background:linear-gradient(135deg,var(--jab-pink),var(--jab-blue)); box-shadow:0 6px 18px rgba(0,0,0,.35)}
+.brand-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, var(--jab-pink) 0%, var(--jab-blue) 70%);
+  box-shadow: 0 0 12px rgba(127, 255, 65, 0.5);
+  animation: pulse 2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 10px rgba(127, 255, 65, 0.4); transform: scale(1); }
+  50% { box-shadow: 0 0 25px rgba(127, 255, 65, 0.7); transform: scale(1.1); }
+}
 .brand-title{font-weight:800; letter-spacing:.2px}
 
 .card{background:#101010; border:1px solid rgba(255,255,255,.08); border-radius:18px; padding:22px; box-shadow:0 10px 30px rgba(0,0,0,.35)}

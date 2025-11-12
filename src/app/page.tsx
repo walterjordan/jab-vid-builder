@@ -176,15 +176,15 @@ export default function Home() {
     }}
   >
     <div>
-      <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800 }}>WOW • AI Ad Creator</h1>
+      <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800 }}>Video Builder • AI Ad Creator</h1>
       <p style={{ marginTop: 8, color: TEXT_DIM }}>
         Generate a short, high-energy ad with synchronized audio. Edit the prompt below to test your own ad concept.
       </p>
     </div>
 
-    {/* Sign in with Google button */}
-    <GoogleSignIn />
-    <UserMenu />
+    {/* Sign in with Google button <GoogleSignIn />
+    <UserMenu /> */}
+    
   </div>
 </div>
 
