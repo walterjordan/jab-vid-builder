@@ -1,6 +1,7 @@
-// app/api/generate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { generateVeoVideo, describeOperation } from "@/lib/veo";
+import { getUserFromCookie } from "@/lib/auth";
+import { consumeDailyQuota } from "@/lib/usage";
 
 /* ----------------------- Helpers ----------------------- */
 
@@ -42,10 +43,6 @@ export async function OPTIONS() {
 }
 
 /* ----------------------- GET: describe operation ----------------------- */
-/**
- * GET /api/generate?name=models/veo-3.0-fast-generate-001/operations/OP_ID
- * Wraps describeOperation() and also returns a normalized top-level `videoUri`.
- */
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -68,30 +65,30 @@ export async function GET(req: NextRequest) {
 }
 
 /* ----------------------- POST: start generation ----------------------- */
-/**
- * POST /api/generate
- * Body:
- * {
- *   "prompt": string,                // required
- *   "model"?: string,                // default veo-3.0-fast-generate-001
- *   "aspectRatio"?: string,          // e.g., "16:9", "9:16"
- *   "resolution"?: string,           // e.g., "720p", "1080p"
- *   "durationSeconds"?: number,      // VEO rules: 720p (4–8s), 1080p often 8s min
- *   "seed"?: number,
- *   "waitForResult"?: boolean,       // default false (return op name immediately)
- *   "timeoutMs"?: number,            // only when waitForResult=true
- *   "minIntervalMs"?: number,        // poll interval lower bound
- *   "maxIntervalMs"?: number         // poll interval upper bound
- * }
- *
- * Response:
- * - 202 + { operationName, model, config } when queued (waitForResult=false)
- * - 200 + { operationName, model, config, done: true, uri } when finished (waitForResult=true and URI available)
- */
 export async function POST(req: NextRequest) {
   try {
+    // ✅ Check user session first
+    const user = getUserFromCookie();
+    if (!user) {
+      return NextResponse.json(
+        { error: "Not authenticated" },
+        { status: 401, headers: corsHeaders() }
+      );
+    }
+
+    // ✅ Enforce daily limit (3 per day)
+    const quota = await consumeDailyQuota(user.sub, 3);
+    if (!quota.ok) {
+      return NextResponse.json(
+        { error: "Daily limit reached. Try again tomorrow." },
+        { status: 429, headers: corsHeaders() }
+      );
+    }
+
+    // Parse request body
     const body = await req.json().catch(() => ({}));
 
+    // Generate the video
     const result = await generateVeoVideo({
       prompt: body?.prompt,
       model: body?.model,
@@ -131,3 +128,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: msg }, { status, headers: corsHeaders() });
   }
 }
+

@@ -1,8 +1,10 @@
 // src/app/page.tsx
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { CSSProperties } from "react";
+import GoogleSignIn from "../components/GoogleSignIn";
+import UserMenu from "../components/UserMenu";
 
 /* --- helper: poll operation until done or timeout --- */
 async function pollOperation(
@@ -61,7 +63,7 @@ type Result = { uri: string; name: string };
 
 export default function Home() {
   const [prompt, setPrompt] = useState(
-    "A cozy living room with soft fall sunlight. Two WOW 1 DAY PAINTING crew members in emerald-green shirts prep the wall with quick, confident motions. Overlay text: “Fall means family — make home holiday-ready in 1 day.” CTA overlay: “Book Now → wow1day.com.” Background: warm, light acoustic beat."
+    "A modern workspace bathed in soft daylight. Diverse professionals collaborate around sleek laptops, exchanging ideas with confident energy."
   );
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("720p");
@@ -71,6 +73,22 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<Result | null>(null);
+   // Track user login session
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/auth/session", { cache: "no-store" });
+        if (r.ok) {
+          const u = await r.json();
+          setUser(u);
+        }
+      } catch (err) {
+        console.error("Failed to check session", err);
+      }
+    })();
+  }, []);
 
   const modelNote = useMemo(
     () => MODELS.find((m) => m.value === model)?.note ?? "",
@@ -148,11 +166,28 @@ export default function Home() {
       <div style={{ maxWidth: 1120, margin: "22px auto", padding: "0 20px" }}>
         <div style={{ background: CARD, border: `1px solid ${CARD_BORDER}`, borderRadius: 16, boxShadow: "0 12px 32px rgba(0,0,0,0.35)", overflow: "hidden" }}>
           <div style={{ padding: "22px 22px 0", borderBottom: `2px solid ${ACCENT}` }}>
-            <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800 }}>WOW • AI Ad Creator</h1>
-            <p style={{ marginTop: 8, color: TEXT_DIM }}>
-              Generate a short, high-energy kitchen transformation ad with synchronized audio. Edit the prompt below to test your own ad concept.
-            </p>
-          </div>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 16,
+      flexWrap: "wrap",
+    }}
+  >
+    <div>
+      <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800 }}>WOW • AI Ad Creator</h1>
+      <p style={{ marginTop: 8, color: TEXT_DIM }}>
+        Generate a short, high-energy ad with synchronized audio. Edit the prompt below to test your own ad concept.
+      </p>
+    </div>
+
+    {/* Sign in with Google button */}
+    <GoogleSignIn />
+    <UserMenu />
+  </div>
+</div>
+
 
           <div style={{ padding: 22 }}>
             {/* Prompt */}
@@ -234,20 +269,23 @@ export default function Home() {
             {/* Actions */}
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 18 }}>
               <button
-                disabled={busy}
-                onClick={handleGenerate}
-                style={{
-                  background: JAB_GREEN,
-                  color: "#0b0b0b",
-                  fontWeight: 700,
-                  border: "none",
-                  borderRadius: 8,
-                  padding: "12px 18px",
-                  cursor: busy ? "not-allowed" : "pointer",
-                }}
-              >
-                {busy ? "Generating…" : "Generate Video"}
-              </button>
+  disabled={busy || !user}
+  onClick={user ? handleGenerate : undefined}
+  style={{
+    background: user ? JAB_GREEN : "gray",
+    color: "#0b0b0b",
+    fontWeight: 700,
+    border: "none",
+    borderRadius: 8,
+    padding: "12px 18px",
+    cursor: busy || !user ? "not-allowed" : "pointer",
+    opacity: user ? 1 : 0.6,
+  }}
+  title={!user ? "Sign in to generate videos" : ""}
+>
+  {!user ? "Sign in to Generate" : busy ? "Generating…" : "Generate Video"}
+</button>
+
 
               {result?.uri && (
                 <a
