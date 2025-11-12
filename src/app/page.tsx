@@ -63,7 +63,7 @@ type Result = { uri: string; name: string };
 
 export default function Home() {
   const [prompt, setPrompt] = useState(
-    "A modern workspace bathed in soft daylight. Diverse professionals collaborate around sleek laptops, exchanging ideas with confident energy."
+    "A futuristic workspace glowing with neon accents. Diverse creators brainstorm around holographic screens and sleek laptops. One of them is tall with an athletic build with expressive eyes and an easy, confident smile. Her skin is a warm brown and her demeanor strikes a balance between soft and sharp intelligence. She turns and says Don't chase. Attract what's meant for you and let your energy be contagious."
   );
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("720p");
@@ -176,9 +176,9 @@ export default function Home() {
     }}
   >
     <div>
-      <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800 }}>Video Builder • AI Ad Creator</h1>
+      <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800 }}>AI Video Builder</h1>
       <p style={{ marginTop: 8, color: TEXT_DIM }}>
-        Generate a short, high-energy ad with synchronized audio. Edit the prompt below to test your own ad concept.
+        Generate short, high-quality video with synchronized audio. Edit the prompt below to test your own video concept.
       </p>
     </div>
 

@@ -21,7 +21,6 @@ body{margin:0; font-family: Inter, Montserrat, system-ui, -apple-system, Segoe U
   box-shadow: 0 0 12px rgba(127, 255, 65, 0.5);
   animation: pulse 2s infinite ease-in-out;
 }
-
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 10px rgba(127, 255, 65, 0.4); transform: scale(1); }
   50% { box-shadow: 0 0 25px rgba(127, 255, 65, 0.7); transform: scale(1.1); }
@@ -44,9 +43,8 @@ body{margin:0; font-family: Inter, Montserrat, system-ui, -apple-system, Segoe U
 .link{color:var(--jab-blue); text-decoration:none}
 .link:hover{text-decoration:underline}
 .video{width:100%; max-height:520px; border-radius:16px; border:1px solid rgba(255,255,255,.1)}
-.prompt-block {
-  flex: 1 1 100%;
-}
+.prompt-block { flex: 1 1 100%; }
+
 /* === JAB Theme (no Tailwind) === */
 :root{
   --jab-bg: #010e63;      /* deep navy background */
@@ -140,3 +138,28 @@ body { margin: 0; background: var(--jab-bg); color: var(--jab-ink); font-family:
   font-size: 15px;
   line-height: 1.5;
 }
+
+/* ===========================
+   Floating auth on mobile
+   =========================== */
+.auth-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Float the Google button (and UserMenu) on small screens */
+@media (max-width: 600px) {
+  .auth-area {
+    position: fixed;
+    bottom: calc(1rem + env(safe-area-inset-bottom));
+    right: calc(1rem + env(safe-area-inset-right));
+    z-index: 1000;
+    background: rgba(0,0,0,.45);
+    backdrop-filter: blur(6px);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 9999px;
+    padding: 6px 8px;
+  }
+}
+

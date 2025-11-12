@@ -8,10 +8,11 @@ export const metadata: Metadata = {
   description: "Generate up to 8s video ads with the worlds most advanced AI generator.",
   icons: [
     { rel: "icon", url: "/favicon.svg", type: "image/svg+xml" },
-    { rel: "apple-touch-icon", url: "/favicon.png" },]
+    { rel: "apple-touch-icon", url: "/favicon.png" },
+  ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }){
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
@@ -21,15 +22,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }){
               <div className="brand-badge" />
               <div className="brand-title">JAB • Video Builder</div>
             </div>
+
             <div>
-              <a className="link" href="https://jordanborden.com" target="_blank" rel="noreferrer">by Jordan & Borden</a>
+              <a
+                className="link"
+                href="https://jordanborden.com"
+                target="_blank"
+                rel="noreferrer"
+              >
+                by Jordan &amp; Borden
+              </a>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+
+            {/* Floating on mobile */}
+            <div className="auth-area">
               <UserMenu />
               <GoogleSignIn />
             </div>
           </nav>
         </header>
+
         <main className="container">{children}</main>
       </body>
     </html>

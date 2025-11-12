@@ -2,6 +2,16 @@
 import { GoogleGenAI } from "@google/genai";
 
 const DEBUG = process.env.NODE_ENV !== "production";
+const API_KEY =
+  process.env.GENAI_API_KEY ||
+  process.env.GOOGLE_API_KEY ||
+  process.env.GEMINI_API_KEY;
+
+if (!API_KEY) {
+  throw new Error(
+    "Missing API key. Set GENAI_API_KEY (or GOOGLE_API_KEY / GEMINI_API_KEY)."
+  );
+}
 const log = (...args: any[]) => {
   if (DEBUG) console.log("[veo]", ...args);
 };
