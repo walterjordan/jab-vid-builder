@@ -2,7 +2,7 @@ JAB VID Builder 3.1 This is a [Next.js](https://nextjs.org) project bootstrapped
 
 ## Getting Started
 
-First, run the development server:
+First, run it from the development server:
 
 ```bash
 npm run dev
