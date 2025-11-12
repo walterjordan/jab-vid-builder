@@ -2,28 +2,18 @@
 import { GoogleGenAI } from "@google/genai";
 
 const DEBUG = process.env.NODE_ENV !== "production";
-const API_KEY =
-  process.env.GENAI_API_KEY ||
-  process.env.GOOGLE_API_KEY ||
-  process.env.GEMINI_API_KEY;
+const log = (...args: any[]) => { if (DEBUG) console.log("[veo]", ...args); };
 
-if (!API_KEY) {
-  throw new Error(
-    "Missing API key. Set GENAI_API_KEY (or GOOGLE_API_KEY / GEMINI_API_KEY)."
-  );
-}
-const log = (...args: any[]) => {
-  if (DEBUG) console.log("[veo]", ...args);
-};
-
+/** Read the API key lazily at request time. */
 function getApiKey(): string {
   const key =
     process.env.GENAI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
-    process.env.GOOGLE_GENAI_API_KEY;
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY; // optional alt
   if (!key) {
     throw new Error(
-      "Missing API key. Set GENAI_API_KEY (or GOOGLE_API_KEY) in your environment."
+      "Missing API key. Set GENAI_API_KEY (or GOOGLE_API_KEY / GEMINI_API_KEY) in your environment."
     );
   }
   return key;
@@ -31,16 +21,16 @@ function getApiKey(): string {
 
 export type GenerateVeoRequest = {
   prompt: string;
-  model?: string; // default veo-3.0-fast-generate-001
+  model?: string;
   aspectRatio?: string;
   resolution?: string;
-  durationSeconds?: number; // clamped 2..60
+  durationSeconds?: number;
   seed?: number;
-  waitForResult?: boolean;  // if true, server will poll until done (or timeout)
-  timeoutMs?: number;       // total max wait (default 120_000)
-  minIntervalMs?: number;   // minimum polling interval (default 2000)
-  maxIntervalMs?: number;   // maximum polling interval (default 8000)
-  signal?: AbortSignal;     // optional, to cancel waits from caller
+  waitForResult?: boolean;
+  timeoutMs?: number;
+  minIntervalMs?: number;
+  maxIntervalMs?: number;
+  signal?: AbortSignal;
 };
 
 export type GenerateVeoQueued = {
@@ -69,14 +59,14 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 
-/** Some responses nest the operation name differently; normalize it. */
+/** Normalize op name across response shapes. */
 function extractOperationName(x: any): string | undefined {
   return x?.name || x?.operation?.name;
 }
 
 /** Exponential backoff with jitter */
 function nextIntervalMs(i: number, minMs: number, maxMs: number) {
-  const base = Math.min(maxMs, minMs * Math.pow(1.6, i)); // growth factor ~1.6
+  const base = Math.min(maxMs, minMs * Math.pow(1.6, i));
   const jitter = Math.random() * (base * 0.25);
   return Math.floor(base + jitter);
 }
@@ -102,30 +92,23 @@ function findUriDeep(obj: any): string | undefined {
   }
 }
 
-/** Describe an operation by name via REST (Generative Language API). */
+/** Describe an operation via REST (Generative Language API). */
 export async function describeOperation(
   operationName: string,
-  apiKey = getApiKey()
+  apiKey = getApiKey()   // evaluated when function is called (runtime)
 ): Promise<any> {
-  const url = `https://generativelanguage.googleapis.com/v1beta/${encodeURI(
-    operationName
-  )}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/${encodeURI(operationName)}`;
 
-  const res = await fetch(url, {
-    headers: { "x-goog-api-key": apiKey },
-  });
-
+  const res = await fetch(url, { headers: { "x-goog-api-key": apiKey } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg =
-      body?.error?.message ||
-      `Failed to describe operation (${res.status})`;
+    const msg = body?.error?.message || `Failed to describe operation (${res.status})`;
     throw new Error(msg);
   }
   return body;
 }
 
-/** Sleep with optional AbortSignal support. */
+/** Sleep with optional AbortSignal. */
 function sleep(ms: number, signal?: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("Aborted"));
@@ -133,14 +116,10 @@ function sleep(ms: number, signal?: AbortSignal) {
       if (signal?.aborted) return reject(new Error("Aborted"));
       resolve();
     }, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        reject(new Error("Aborted"));
-      },
-      { once: true }
-    );
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      reject(new Error("Aborted"));
+    }, { once: true });
   });
 }
 
@@ -166,15 +145,12 @@ export async function pollUntilDone(opts: {
   let attempt = 0;
 
   while (true) {
-    if (signal?.aborted) {
-      throw new Error("Polling aborted by caller.");
-    }
+    if (signal?.aborted) throw new Error("Polling aborted by caller.");
 
     let desc: any;
     try {
       desc = await describeOperation(operationName, apiKey);
     } catch (e: any) {
-      // tolerate brief 429/5xx with a retry
       const msg = String(e?.message || "");
       if (/(429|5\d\d|quota|unavailable|deadline)/i.test(msg)) {
         const wait = nextIntervalMs(attempt++, minIntervalMs, maxIntervalMs);
@@ -190,41 +166,30 @@ export async function pollUntilDone(opts: {
 
     if (done) {
       log("✅ Operation reports done:", operationName);
-      if (uri) {
-        return { uri, raw: desc };
-      } else {
-        // Sometimes done=true lands before URI is populated — do a few short follow-ups.
-        for (let i = 0; i < 5; i++) {
-          const shortWait = 800 + i * 200;
-          await sleep(shortWait, signal);
-          const recheck = await describeOperation(operationName, apiKey);
-          const maybeUri = findUriDeep(recheck?.response);
-          if (maybeUri) {
-            log("🎯 URI appeared on follow-up:", maybeUri);
-            return { uri: maybeUri, raw: recheck };
-          }
-        }
-        log("⚠️ Done=true but no URI found; returning raw payload.");
-        return { uri: undefined, raw: desc };
+      if (uri) return { uri, raw: desc };
+
+      // Sometimes done=true arrives before URI is populated — short follow-ups.
+      for (let i = 0; i < 5; i++) {
+        const shortWait = 800 + i * 200;
+        await sleep(shortWait, signal);
+        const recheck = await describeOperation(operationName, apiKey);
+        const maybeUri = findUriDeep(recheck?.response);
+        if (maybeUri) return { uri: maybeUri, raw: recheck };
       }
+      log("⚠️ Done=true but no URI found; returning raw payload.");
+      return { uri: undefined, raw: desc };
     }
 
-    // not done yet
     const wait = nextIntervalMs(attempt++, minIntervalMs, maxIntervalMs);
     const elapsed = Date.now() - started;
     if (elapsed + wait > timeoutMs) {
-      throw new Error(
-        `Timeout while polling operation (${operationName}) after ${elapsed}ms`
-      );
+      throw new Error(`Timeout while polling operation (${operationName}) after ${elapsed}ms`);
     }
     await sleep(wait, signal);
   }
 }
 
-/**
- * Start a VEO job. If waitForResult=true, poll until done (or timeout) and return the URI.
- * Otherwise return just the operationName for client-side polling.
- */
+/** Start a VEO job; optionally wait for completion. */
 export async function generateVeoVideo(req: GenerateVeoRequest): Promise<GenerateVeoResponse> {
   const {
     prompt,
@@ -251,7 +216,7 @@ export async function generateVeoVideo(req: GenerateVeoRequest): Promise<Generat
     MAX_DURATION
   );
 
-  const apiKey = getApiKey();
+  const apiKey = getApiKey();                   // evaluated at request time
   const ai = new GoogleGenAI({ apiKey });
 
   const config: Record<string, any> = {
@@ -263,46 +228,28 @@ export async function generateVeoVideo(req: GenerateVeoRequest): Promise<Generat
   if (resolution) config.resolution = resolution;
   if (typeof seed === "number") config.seed = seed;
 
-  // Kick off generation; this returns an LRO (operation)
-  // @ts-ignore: types for generateVideos may lag the API surface
-  const op: any = await ai.models.generateVideos({
-    model,
-    prompt,
-    config,
-  });
+  // @ts-ignore - API surface may lag types
+  const op: any = await ai.models.generateVideos({ model, prompt, config });
 
   const opName = extractOperationName(op);
   if (!opName) {
     log("❌ No operation name on response:", op);
     throw new Error("Operation name was not returned by the API.");
-    }
-
-  // Structured log you can grep in Cloud Run logs
-  console.log(
-    JSON.stringify(
-      {
-        severity: "INFO",
-        where: "lib/veo",
-        event: "video_operation_created",
-        operationName: opName,
-        model,
-        config,
-      },
-      null,
-      2
-    )
-  );
-
-  if (!waitForResult) {
-    // Return immediately; let caller/UI poll
-    return {
-      operationName: opName,
-      model,
-      config,
-    };
   }
 
-  // Otherwise, block until we get a result (or timeout)
+  console.log(JSON.stringify({
+    severity: "INFO",
+    where: "lib/veo",
+    event: "video_operation_created",
+    operationName: opName,
+    model,
+    config,
+  }));
+
+  if (!waitForResult) {
+    return { operationName: opName, model, config };
+  }
+
   const polled = await pollUntilDone({
     operationName: opName,
     apiKey,
@@ -314,24 +261,12 @@ export async function generateVeoVideo(req: GenerateVeoRequest): Promise<Generat
 
   const uri = polled.uri;
   if (!uri) {
-    // Give the caller everything so they can inspect and decide
-    log("⚠️ Completed without URI — returning queued shape + raw hint");
-    return {
-      operationName: opName,
-      model,
-      config,
-      // not marking done unless we actually have a URI
-    } as GenerateVeoQueued;
+    log("⚠️ Completed without URI — returning queued shape.");
+    return { operationName: opName, model, config } as GenerateVeoQueued;
   }
 
   log("✅ Operation complete. URI ready:", uri);
-  return {
-    operationName: opName,
-    model,
-    config,
-    done: true,
-    uri,
-    durationSeconds,
-  } as GenerateVeoCompleted;
+  return { operationName: opName, model, config, done: true, uri, durationSeconds } as GenerateVeoCompleted;
 }
+
 
