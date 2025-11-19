@@ -11,6 +11,7 @@ export const metadata: Metadata = {
     { rel: "icon", url: "/favicon.svg", type: "image/svg+xml" },
     { rel: "apple-touch-icon", url: "/favicon.png" },
   ],
+  themeColor: "#630183",   // <<< THIS MAKES iMESSAGE PREVIEW PURPLE
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

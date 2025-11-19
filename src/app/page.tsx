@@ -75,6 +75,7 @@ export default function Home() {
   const [result, setResult] = useState<Result | null>(null);
    // Track user login session
   const [user, setUser] = useState(null);
+  const [files, setFiles] = useState<File[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -107,24 +108,32 @@ export default function Home() {
         return;
       }
 
-      const body: Record<string, any> = {
-        prompt,
-        aspectRatio,
-        resolution,
-        durationSeconds: duration,
-        model,
-      };
+      // ⬇️ Build FormData so we can send prompt + options + attached files
+const fd = new FormData();
+fd.append("prompt", prompt ?? "");
+fd.append("aspectRatio", aspectRatio ?? "");
+fd.append("resolution", resolution ?? "");
+fd.append("durationSeconds", String(duration ?? ""));
+fd.append("model", model ?? "");
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+// 👇 assumes you have an array of File objects called `files`
+// (e.g. from <input type="file" multiple onChange={e => setFiles([...e.target.files])}>)
+if (Array.isArray(files)) {
+  for (const file of files) {
+    fd.append("files", file);
+  }
+}
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "Server error while starting generation.");
-      }
+const res = await fetch("/api/generate", {
+  method: "POST",
+  // ❌ remove JSON headers – the browser will set multipart boundaries for us
+  body: fd,
+});
+
+const data = await res.json();
+if (!res.ok) {
+  throw new Error(data?.error || "Server error while starting generation.");
+}
 
       const opName: string | undefined =
         data?.operationName || data?.name || data?.operation?.name;
@@ -147,7 +156,27 @@ export default function Home() {
         String(ts.getMinutes()).padStart(2, "0") +
         String(ts.getSeconds()).padStart(2, "0");
 
-      setResult({ uri: polled.uri, name: `veo_${stamp}.mp4` });
+      const fileName = `veo_${stamp}.mp4`;
+      setResult({ uri: polled.uri, name: fileName });
+
+      // ⭐ Save to local history for /history page
+      if (typeof window !== "undefined") {
+        try {
+          const raw = window.localStorage.getItem("veoHistory");
+          const prev = raw ? JSON.parse(raw) : [];
+          const entry = {
+            uri: polled.uri,
+            name: fileName,
+            prompt,
+            model,
+            createdAt: ts.toISOString(),
+          };
+          const next = [entry, ...prev].slice(0, 50); // keep last 50
+          window.localStorage.setItem("veoHistory", JSON.stringify(next));
+        } catch (err) {
+          console.error("Failed to save history", err);
+        }
+      }
     } catch (e: any) {
       setError(
         e?.message?.includes("429")
@@ -265,7 +294,29 @@ export default function Home() {
                 />
               </div>
             </div>
-
+ {/* Reference media upload */}
+            <div style={{ marginTop: 18 }}>
+              <label
+                style={{ display: "block", marginBottom: 8, opacity: 0.9 }}
+              >
+                Reference images / base video (optional)
+              </label>
+              <input
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                onChange={(e) =>
+                  setFiles(Array.from(e.target.files ?? []))
+                }
+                style={{
+                  width: "100%",
+                  color: TEXT_MAIN,
+                }}
+              />
+              <small style={{ color: TEXT_DIM }}>
+                Attach up to 3 images or one short video to guide Veo 3.1.
+              </small>
+            </div>
             {/* Actions */}
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 18 }}>
               <button

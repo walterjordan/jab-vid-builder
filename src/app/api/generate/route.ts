@@ -5,7 +5,7 @@ import { consumeDailyQuota } from "@/lib/usage";
 
 /* ----------------------- Helpers ----------------------- */
 
-function corsHeaders() {
+function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
@@ -14,7 +14,10 @@ function corsHeaders() {
 }
 
 function jsonError(message: string, status = 400) {
-  return NextResponse.json({ error: message }, { status, headers: corsHeaders() });
+  return NextResponse.json(
+    { error: message },
+    { status, headers: corsHeaders() }
+  );
 }
 
 /** Find the first URI anywhere in the object (handles current VEO nesting). */
@@ -49,13 +52,19 @@ export async function GET(req: NextRequest) {
     const name = searchParams.get("name");
 
     if (!name || !name.startsWith("models/")) {
-      return jsonError("Missing or invalid 'name'. Expected 'models/.../operations/ID'.", 400);
+      return jsonError(
+        "Missing or invalid 'name'. Expected 'models/.../operations/ID'.",
+        400
+      );
     }
 
     const data = await describeOperation(name);
     const uri = findUriDeep((data as any)?.response) ?? null;
 
-    return NextResponse.json({ ...data, videoUri: uri }, { headers: corsHeaders() });
+    return NextResponse.json(
+      { ...data, videoUri: uri },
+      { headers: corsHeaders() }
+    );
   } catch (err: any) {
     return NextResponse.json(
       { error: err?.message || "Unknown server error" },
@@ -85,22 +94,123 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Parse request body
-    const body = await req.json().catch(() => ({}));
+    const contentType = req.headers.get("content-type") || "";
 
-    // Generate the video
+    let prompt: string | undefined;
+    let model: string | undefined;
+    let aspectRatio: string | undefined;
+    let resolution: string | undefined;
+    // default to a Veo-valid duration
+    let durationSeconds: number = 6;
+    let seed: number | undefined;
+    let waitForResult = false;
+    let timeoutMs: number | undefined;
+    let minIntervalMs: number | undefined;
+    let maxIntervalMs: number | undefined;
+
+    // media
+    const referenceImages: { mimeType: string; bytes: Buffer }[] = [];
+    let baseVideo:
+      | { mimeType: string; bytes: Buffer }
+      | undefined = undefined;
+
+    if (contentType.includes("multipart/form-data")) {
+      // 🔸 form-data: prompt + options + attached files
+      const form = await req.formData();
+
+      prompt = (form.get("prompt") as string) || "";
+      model = (form.get("model") as string) || undefined;
+      aspectRatio = (form.get("aspectRatio") as string) || undefined;
+      resolution = (form.get("resolution") as string) || undefined;
+
+      // durationSeconds from form
+      const durRaw = form.get("durationSeconds") as string | null;
+      const durNum =
+        durRaw !== null && durRaw !== undefined ? Number(durRaw) : NaN;
+      if (!Number.isNaN(durNum)) {
+        durationSeconds = durNum;
+      }
+
+      // seed from form
+      const seedRaw = form.get("seed") as string | null;
+      const seedNum =
+        seedRaw !== null && seedRaw !== undefined ? Number(seedRaw) : NaN;
+      if (!Number.isNaN(seedNum)) {
+        seed = seedNum;
+      }
+
+      waitForResult = (form.get("waitForResult") as string) === "true";
+      timeoutMs = form.get("timeoutMs")
+        ? Number(form.get("timeoutMs") as string)
+        : undefined;
+      minIntervalMs = form.get("minIntervalMs")
+        ? Number(form.get("minIntervalMs") as string)
+        : undefined;
+      maxIntervalMs = form.get("maxIntervalMs")
+        ? Number(form.get("maxIntervalMs") as string)
+        : undefined;
+
+      const files = form.getAll("files") as File[];
+      for (const file of files) {
+        const bytes = Buffer.from(await file.arrayBuffer());
+
+        if (file.type.startsWith("image/")) {
+          referenceImages.push({
+            mimeType: file.type,
+            bytes,
+          });
+        } else if (file.type.startsWith("video/") && !baseVideo) {
+          baseVideo = {
+            mimeType: file.type,
+            bytes,
+          };
+        }
+      }
+    } else {
+      // 🔸 JSON body fallback (no files)
+      const body = (await req.json().catch(() => ({}))) as any;
+
+      prompt = body?.prompt;
+      model = body?.model;
+      aspectRatio = body?.aspectRatio;
+      resolution = body?.resolution;
+
+      const durJsonNum =
+        body?.durationSeconds !== undefined && body?.durationSeconds !== null
+          ? Number(body.durationSeconds)
+          : NaN;
+      if (!Number.isNaN(durJsonNum)) {
+        durationSeconds = durJsonNum;
+      }
+
+      const seedJsonNum =
+        body?.seed !== undefined && body?.seed !== null
+          ? Number(body.seed)
+          : NaN;
+      if (!Number.isNaN(seedJsonNum)) {
+        seed = seedJsonNum;
+      }
+
+      waitForResult = Boolean(body?.waitForResult);
+      timeoutMs = body?.timeoutMs;
+      minIntervalMs = body?.minIntervalMs;
+      maxIntervalMs = body?.maxIntervalMs;
+    }
+
     const result = await generateVeoVideo({
-      prompt: body?.prompt,
-      model: body?.model,
-      aspectRatio: body?.aspectRatio,
-      resolution: body?.resolution,
-      durationSeconds: body?.durationSeconds,
-      seed: body?.seed,
-      waitForResult: Boolean(body?.waitForResult),
-      timeoutMs: body?.timeoutMs,
-      minIntervalMs: body?.minIntervalMs,
-      maxIntervalMs: body?.maxIntervalMs,
-    });
+      prompt,
+      model,
+      aspectRatio,
+      resolution,
+      durationSeconds,
+      seed,
+      waitForResult,
+      timeoutMs,
+      minIntervalMs,
+      maxIntervalMs,
+      referenceImages,
+      baseVideo,
+    } as any);
 
     const isDone = (result as any)?.done === true && !!(result as any)?.uri;
 
@@ -110,7 +220,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     const msg = String(err?.message || "Unknown server error");
-    const status = /invalid|missing|timeout|400|INVALID_ARGUMENT/i.test(msg) ? 400 : 500;
+    const status = /invalid|missing|timeout|400|INVALID_ARGUMENT/i.test(msg)
+      ? 400
+      : 500;
 
     console.error(
       JSON.stringify(
@@ -125,7 +237,12 @@ export async function POST(req: NextRequest) {
       )
     );
 
-    return NextResponse.json({ error: msg }, { status, headers: corsHeaders() });
+    return NextResponse.json(
+      { error: msg },
+      { status, headers: corsHeaders() }
+    );
   }
 }
+
+
 
